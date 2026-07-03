@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: docintel
+      POSTGRES_PASSWORD: docintel
+      POSTGRES_DB: docintel
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  web:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+    ports: ["8000:8000"]
+    environment:
+      ENV: development
+      DATABASE_URL: postgresql://docintel:docintel@postgres:5432/docintel
+      REDIS_URL: redis://redis:6379/0
+      FRONTEND_ORIGIN: http://localhost:5173
+    depends_on: [redis, postgres]
+
+  worker:
+    build: ./backend
+    command: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+    environment:
+      ENV: development
+      DATABASE_URL: postgresql://docintel:docintel@postgres:5432/docintel
+      REDIS_URL: redis://redis:6379/0
+    depends_on: [redis, postgres]
+
+  frontend:
+    build: ./frontend
+    command: npm run dev -- --host 0.0.0.0
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports: ["5173:5173"]
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
+    depends_on: [web]
+
+volumes:
+  pgdata:
