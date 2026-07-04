@@ -1,5 +1,4 @@
 import os
-import shutil
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models, schemas
 from app.config import settings
+from app.auth import get_current_user
 from app.tasks import process_document_task, sync_document_to_crm_task, compute_content_hash
 from app.pipeline.ingestion import detect_format
 
@@ -16,14 +16,28 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 ALLOWED_EXTENSIONS = {"pdf", "docx", "xlsx", "xls", "jpg", "jpeg", "png"}
 
 
+def _get_owned_document(document_id: str, current_user: models.User, db: Session) -> models.Document:
+    """A document's ownership is derived from its project's owner_id --
+    documents don't carry owner_id directly to avoid it ever drifting out
+    of sync with the project it belongs to."""
+    document = db.query(models.Document).get(document_id)
+    if not document:
+        raise HTTPException(404, "Document not found")
+    project = db.query(models.Project).get(document.project_id)
+    if not project or project.owner_id != current_user.id:
+        raise HTTPException(404, "Document not found")
+    return document
+
+
 @router.post("/upload", response_model=schemas.DocumentOut)
 async def upload_document(
     project_id: str,
     file: UploadFile = File(...),
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     project = db.query(models.Project).get(project_id)
-    if not project:
+    if not project or project.owner_id != current_user.id:
         raise HTTPException(404, "Project not found")
 
     ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
@@ -63,15 +77,21 @@ async def upload_document(
 
 
 @router.get("/{document_id}", response_model=schemas.DocumentOut)
-def get_document(document_id: str, db: Session = Depends(get_db)):
-    document = db.query(models.Document).get(document_id)
-    if not document:
-        raise HTTPException(404, "Document not found")
-    return document
+def get_document(
+    document_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _get_owned_document(document_id, current_user, db)
 
 
 @router.get("/{document_id}/stages")
-def get_document_stages(document_id: str, db: Session = Depends(get_db)):
+def get_document_stages(
+    document_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _get_owned_document(document_id, current_user, db)
     rows = (
         db.query(models.PipelineStageResult)
         .filter_by(document_id=document_id)
@@ -90,12 +110,22 @@ def get_document_stages(document_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{document_id}/anomalies", response_model=list[schemas.AnomalyOut])
-def get_document_anomalies(document_id: str, db: Session = Depends(get_db)):
+def get_document_anomalies(
+    document_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _get_owned_document(document_id, current_user, db)
     return db.query(models.Anomaly).filter_by(document_id=document_id).all()
 
 
 @router.get("/{document_id}/crm-sync", response_model=schemas.CrmSyncOut)
-def get_crm_sync_status(document_id: str, db: Session = Depends(get_db)):
+def get_crm_sync_status(
+    document_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _get_owned_document(document_id, current_user, db)
     row = db.query(models.CrmSyncRecord).filter_by(document_id=document_id).first()
     if not row:
         raise HTTPException(404, "No CRM sync record yet")
@@ -103,19 +133,23 @@ def get_crm_sync_status(document_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{document_id}/crm-sync/retry")
-def retry_crm_sync(document_id: str, db: Session = Depends(get_db)):
-    document = db.query(models.Document).get(document_id)
-    if not document:
-        raise HTTPException(404, "Document not found")
+def retry_crm_sync(
+    document_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _get_owned_document(document_id, current_user, db)
     sync_document_to_crm_task.delay(document_id)
     return {"queued": True}
 
 
 @router.post("/{document_id}/reprocess")
-def reprocess_document(document_id: str, db: Session = Depends(get_db)):
-    document = db.query(models.Document).get(document_id)
-    if not document:
-        raise HTTPException(404, "Document not found")
+def reprocess_document(
+    document_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = _get_owned_document(document_id, current_user, db)
     if not os.path.exists(document.filepath):
         raise HTTPException(410, "Original file no longer available on disk (ephemeral storage) -- re-upload to reprocess.")
     document.status = models.ProcessingStatus.queued
@@ -126,10 +160,12 @@ def reprocess_document(document_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{document_id}")
-def delete_document(document_id: str, db: Session = Depends(get_db)):
-    document = db.query(models.Document).get(document_id)
-    if not document:
-        raise HTTPException(404, "Document not found")
+def delete_document(
+    document_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = _get_owned_document(document_id, current_user, db)
     if document.filepath and os.path.exists(document.filepath):
         try:
             os.remove(document.filepath)
