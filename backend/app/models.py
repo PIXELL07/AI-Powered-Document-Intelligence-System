@@ -34,14 +34,28 @@ class Severity(str, enum.Enum):
     informational = "informational"
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    email = Column(String, nullable=False, unique=True, index=True)
+    hashed_password = Column(String, nullable=False)
+    name = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
+
+
 class Project(Base):
     __tablename__ = "projects"
 
     id = Column(String, primary_key=True, default=gen_id)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    owner = relationship("User", back_populates="projects")
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
     contradictions = relationship("Contradiction", back_populates="project", cascade="all, delete-orphan")
 
