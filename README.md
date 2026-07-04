@@ -179,6 +179,38 @@ The Notion database (or Airtable table) needs these properties/fields:
 `CriticalAnomalies` / `WarningAnomalies` / `InfoAnomalies` (number),
 `PlatformLink` (url/text).
 
+## Authentication
+
+Signup/login is JWT-based (`backend/app/auth.py`): bcrypt-hashed
+passwords, a single long-lived access token (7 days by default) issued at
+signup/login, sent as `Authorization: Bearer <token>` on every request.
+Projects belong to a user (`Project.owner_id`); every project/document
+route checks ownership and returns a plain 404 (not 403) for another
+user's resources, so a guessed ID can't be used to confirm something
+exists.
+
+The WebSocket endpoint can't receive an `Authorization` header (browsers
+don't support custom headers on the WS handshake), so the token is passed
+as a query param instead: `/ws/documents/{id}?token=...`. The frontend's
+`ws.js` does this automatically.
+
+Set `JWT_SECRET` (and `SECRET_KEY`) to a real random value in production —
+the defaults in `.env.example` are placeholders and must not be used as-is.
+
+**Frontend auth**: `src/auth/AuthContext.jsx` holds the current user and
+token (token in `localStorage`, fine here since this is a real deployed
+app rather than an in-chat artifact sandbox). `src/auth/ProtectedRoute.jsx`
+redirects to `/login` if there's no valid session. Login/Signup pages are
+at `/login` and `/signup`.
+
+This was tested end-to-end against the real running server: signup,
+duplicate-email rejection, weak-password rejection, correct/incorrect
+login, two separate users each only seeing their own projects, cross-user
+access to another user's project/document/WebSocket correctly rejected
+(404 for HTTP, WS closed with 403) rather than leaking existence, and an
+authorized WebSocket connection succeeding and receiving the live status
+stream.
+
 ## Testing performed
 
 This was run end-to-end, not just written and assumed correct:
