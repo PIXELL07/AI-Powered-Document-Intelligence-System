@@ -8,6 +8,31 @@ class ProjectCreate(BaseModel):
     description: Optional[str] = ""
 
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = ""
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    email: str
+    name: str
+    created_at: datetime
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
 class ProjectOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
