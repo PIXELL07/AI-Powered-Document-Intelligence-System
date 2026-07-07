@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { WS_URL } from "./api";
+import { WS_URL, getToken } from "./api";
 
 export function useDocumentSocket(documentId, onMessage) {
   const handlerRef = useRef(onMessage);
@@ -7,7 +7,8 @@ export function useDocumentSocket(documentId, onMessage) {
 
   useEffect(() => {
     if (!documentId) return;
-    const socket = new WebSocket(`${WS_URL}/ws/documents/${documentId}`);
+    const token = getToken();
+    const socket = new WebSocket(`${WS_URL}/ws/documents/${documentId}?token=${encodeURIComponent(token || "")}`);
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
