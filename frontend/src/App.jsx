@@ -1,38 +1,68 @@
-import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
+import ProtectedRoute from "./auth/ProtectedRoute.jsx";
+import LoginPage from "./pages/LoginPage.jsx";
+import SignupPage from "./pages/SignupPage.jsx";
 import ProjectsView from "./pages/ProjectsView.jsx";
 import ProjectDetail from "./pages/ProjectDetail.jsx";
 import DocumentProcessing from "./pages/DocumentProcessing.jsx";
 import DocumentDetail from "./pages/DocumentDetail.jsx";
 
-export default function App() {
+function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
 
   return (
-    <div className="min-h-screen bg-paper">
-      <header className="border-b border-hairline bg-surface">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-baseline justify-between">
-          <Link to="/" className="flex items-baseline gap-3">
-            <span className="font-display text-2xl font-semibold text-ledger tracking-tight">
-              Ledgerline
-            </span>
-            <span className="font-mono text-xs text-inkfaint uppercase tracking-widest">
-              Document Intelligence
-            </span>
-          </Link>
-          <nav className="font-mono text-xs uppercase tracking-widest text-inkfaint">
-            <span className={location.pathname === "/" ? "text-ledger" : ""}>Projects</span>
-          </nav>
-        </div>
-      </header>
+    <header className="border-b border-hairline bg-surface">
+      <div className="max-w-6xl mx-auto px-6 py-4 flex items-baseline justify-between">
+        <Link to="/" className="flex items-baseline gap-3">
+          <span className="font-display text-2xl font-semibold text-ledger tracking-tight">
+            Ledgerline
+          </span>
+          <span className="font-mono text-xs text-inkfaint uppercase tracking-widest">
+            Document Intelligence
+          </span>
+        </Link>
+        <nav className="flex items-center gap-5 font-mono text-xs uppercase tracking-widest text-inkfaint">
+          <span className={location.pathname === "/" ? "text-ledger" : ""}>Projects</span>
+          {user && (
+            <>
+              <span className="text-inkfaint normal-case tracking-normal font-body">
+                {user.name || user.email}
+              </span>
+              <button onClick={handleLogout} className="hover:text-ledger transition">
+                Log out
+              </button>
+            </>
+          )}
+        </nav>
+      </div>
+    </header>
+  );
+}
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <Routes>
-          <Route path="/" element={<ProjectsView />} />
-          <Route path="/projects/:projectId" element={<ProjectDetail />} />
-          <Route path="/documents/:documentId/processing" element={<DocumentProcessing />} />
-          <Route path="/documents/:documentId" element={<DocumentDetail />} />
-        </Routes>
-      </main>
-    </div>
+export default function App() {
+  return (
+    <AuthProvider>
+      <div className="min-h-screen bg-paper">
+        <Header />
+        <main className="max-w-6xl mx-auto px-6 py-8">
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/" element={<ProtectedRoute><ProjectsView /></ProtectedRoute>} />
+            <Route path="/projects/:projectId" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
+            <Route path="/documents/:documentId/processing" element={<ProtectedRoute><DocumentProcessing /></ProtectedRoute>} />
+            <Route path="/documents/:documentId" element={<ProtectedRoute><DocumentDetail /></ProtectedRoute>} />
+          </Routes>
+        </main>
+      </div>
+    </AuthProvider>
   );
 }
