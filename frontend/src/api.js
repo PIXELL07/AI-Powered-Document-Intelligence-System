@@ -1,11 +1,39 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 export const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
 
+const TOKEN_KEY = "docintel_token";
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+// Fired whenever a request comes back 401 (expired/invalid token), so the
+// AuthContext can log the user out and redirect to /login in one place
+// instead of every page having to check response status itself.
+const unauthorizedListeners = new Set();
+export function onUnauthorized(fn) {
+  unauthorizedListeners.add(fn);
+  return () => unauthorizedListeners.delete(fn);
+}
+
 async function request(path, options = {}) {
+  const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
     ...options,
   });
+  if (res.status === 401) {
+    unauthorizedListeners.forEach((fn) => fn());
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status}: ${body}`);
@@ -13,6 +41,14 @@ async function request(path, options = {}) {
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
 }
+
+export const authApi = {
+  signup: (email, password, name) =>
+    request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password, name }) }),
+  login: (email, password) =>
+    request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  me: () => request("/api/auth/me"),
+};
 
 export const api = {
   listProjects: () => request("/api/projects"),
@@ -26,10 +62,13 @@ export const api = {
   uploadDocument: async (projectId, file) => {
     const form = new FormData();
     form.append("file", file);
+    const token = getToken();
     const res = await fetch(`${API_URL}/api/documents/upload?project_id=${projectId}`, {
       method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: form,
     });
+    if (res.status === 401) unauthorizedListeners.forEach((fn) => fn());
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
