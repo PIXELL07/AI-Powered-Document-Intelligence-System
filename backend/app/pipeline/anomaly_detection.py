@@ -4,8 +4,8 @@ Stage 3 (Section 2): anomaly detection.
 Returns a list of anomaly dicts: {severity, category, explanation, evidence}
 severity in {"critical", "warning", "informational"}.
 """
-from datetime import datetime
 from dateutil import parser as dateparser
+from app.utils import utcnow
 from app.config import settings
 
 
@@ -101,7 +101,7 @@ def detect_invoice_anomalies(extraction: dict) -> list[dict]:
     if due_date_str:
         try:
             due_date = dateparser.parse(due_date_str, fuzzy=True)
-            if due_date and due_date.replace(tzinfo=None) < datetime.utcnow():
+            if due_date and due_date.replace(tzinfo=None) < utcnow():
                 anomalies.append(_mk(
                     "critical", "past_due_date",
                     f"The due date on this invoice ({due_date_str.strip()}) is already in the past "
