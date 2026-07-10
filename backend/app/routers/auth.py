@@ -1,11 +1,12 @@
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app import models, schemas
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from app.rate_limit import rate_limit_by_ip
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -13,7 +14,9 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @router.post("/signup", response_model=schemas.TokenOut)
-def signup(payload: schemas.SignupRequest, db: Session = Depends(get_db)):
+def signup(payload: schemas.SignupRequest, request: Request, db: Session = Depends(get_db)):
+    rate_limit_by_ip(request, "signup", limit=20, window_seconds=60)
+
     email = payload.email.strip().lower()
     if not EMAIL_RE.match(email):
         raise HTTPException(400, "Enter a valid email address.")
@@ -38,8 +41,15 @@ def signup(payload: schemas.SignupRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=schemas.TokenOut)
-def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(payload: schemas.LoginRequest, request: Request, db: Session = Depends(get_db)):
+    # Rate limited by IP+email together, not IP alone -- an attacker
+    # spraying many different emails from one IP is still capped per
+    # target account, while a shared office/NAT IP with many legitimate
+    # users logging into their own distinct accounts isn't penalized for
+    # sharing an address.
     email = payload.email.strip().lower()
+    rate_limit_by_ip(request, f"login:{email}", limit=8, window_seconds=60)
+
     user = db.query(models.User).filter_by(email=email).first()
     # Deliberately identical error for "no such user" and "wrong password"
     # so login can't be used to enumerate registered email addresses.
