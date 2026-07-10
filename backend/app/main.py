@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +14,17 @@ from app import models
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
-app = FastAPI(title="Document Intelligence Platform")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    await manager.startup()
+    logger.info("Document Intelligence Platform started (env=%s)", settings.ENV)
+    yield
+    await manager.shutdown()
+
+
+app = FastAPI(title="Document Intelligence Platform", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,18 +37,6 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(projects.router)
 app.include_router(documents.router)
-
-
-@app.on_event("startup")
-async def on_startup():
-    init_db()
-    await manager.startup()
-    logger.info("Document Intelligence Platform started (env=%s)", settings.ENV)
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    await manager.shutdown()
 
 
 @app.get("/api/health")
@@ -74,11 +73,11 @@ async def document_ws(websocket: WebSocket, document_id: str, token: str | None 
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid or expired token")
             return
 
-        document = db.query(models.Document).get(document_id)
+        document = db.get(models.Document, document_id)
         if not document:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Document not found")
             return
-        project = db.query(models.Project).get(document.project_id)
+        project = db.get(models.Project, document.project_id)
         if not project or project.owner_id != user_id:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Not authorized for this document")
             return
