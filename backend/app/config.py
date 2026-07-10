@@ -1,6 +1,4 @@
 import os
-
-
 class Settings:
     # Core
     ENV: str = os.getenv("ENV", "development")
@@ -11,12 +9,12 @@ class Settings:
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", str(60 * 24 * 7)))  # 7 days
 
-    # Database 
+    # Database
     # Railway injects DATABASE_URL for its Postgres plugin. Falls back to
     # local sqlite file for dev so you don't need Postgres running locally.
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./docintel.db")
 
-    # Redis (Celery broker/backend + WebSocket pub/sub fan-out) 
+    # --- Redis (Celery broker/backend + WebSocket pub/sub fan-out) ---
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
     # File storage 
@@ -29,7 +27,7 @@ class Settings:
     OCR_CONFIDENCE_THRESHOLD: float = float(os.getenv("OCR_CONFIDENCE_THRESHOLD", "60.0"))
     OCR_LANGUAGES: str = os.getenv("OCR_LANGUAGES", "eng")
 
-    # Anomaly thresholds (configurable per Section 2, Stage 3) 
+    # Anomaly thresholds (configurable per Section 2, Stage 3) ---
     MAX_TERMINATION_NOTICE_DAYS_LOW: int = int(os.getenv("MIN_TERMINATION_NOTICE_DAYS", "15"))
     MAX_PAYMENT_TERMS_DAYS: int = int(os.getenv("MAX_PAYMENT_TERMS_DAYS", "90"))
     YOY_CHANGE_THRESHOLD_PCT: float = float(os.getenv("YOY_CHANGE_THRESHOLD_PCT", "35.0"))
@@ -47,7 +45,7 @@ class Settings:
     MODEL_IDLE_UNLOAD_SECONDS: int = int(os.getenv("MODEL_IDLE_UNLOAD_SECONDS", "120"))
     MAX_CONCURRENT_MODELS: int = int(os.getenv("MAX_CONCURRENT_MODELS", "1"))
 
-    # CORS
+    # CORS 
     FRONTEND_ORIGIN: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 
 
