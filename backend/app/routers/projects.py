@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 def _get_owned_project(project_id: str, current_user: models.User, db: Session) -> models.Project:
     """404s (not 403) for projects that exist but belong to someone else,
     so a project ID can't be used to probe for its existence."""
-    project = db.query(models.Project).get(project_id)
+    project = db.get(models.Project, project_id)
     if not project or project.owner_id != current_user.id:
         raise HTTPException(404, "Project not found")
     return project
