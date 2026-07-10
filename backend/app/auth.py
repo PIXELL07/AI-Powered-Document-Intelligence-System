@@ -7,7 +7,8 @@ a single long-lived access token issued at login/signup, sent as a
 Bearer token on every request. That's the right amount of complexity for
 an internal tool used by a project team, not a public-facing consumer app.
 """
-from datetime import datetime, timedelta
+from datetime import timedelta
+from app.utils import utcnow
 
 import bcrypt
 import jwt
@@ -34,7 +35,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+    expire = utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
     payload = {"sub": user_id, "exp": expire}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
@@ -56,7 +57,7 @@ def get_current_user(
     if credentials is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated.")
     user_id = decode_access_token(credentials.credentials)
-    user = db.query(models.User).get(user_id)
+    user = db.get(models.User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User no longer exists.")
     return user
