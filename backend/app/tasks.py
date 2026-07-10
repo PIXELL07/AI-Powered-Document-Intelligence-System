@@ -11,7 +11,7 @@ each stage's spinner-then-checkmark-then-output-panel in real time.
 import hashlib
 import logging
 import traceback
-from datetime import datetime
+from app.utils import utcnow
 
 from app.celery_app import celery_app
 from app.database import SessionLocal
@@ -52,9 +52,9 @@ def _set_stage(db, document_id: str, stage_number: int, status: str, output: dic
     if output is not None:
         row.output = output
     if status == "active":
-        row.started_at = datetime.utcnow()
+        row.started_at = utcnow()
     if status in ("complete", "failed"):
-        row.completed_at = datetime.utcnow()
+        row.completed_at = utcnow()
     db.commit()
 
     publish_stage_update(document_id, {
@@ -71,7 +71,7 @@ def _set_stage(db, document_id: str, stage_number: int, status: str, output: dic
 def process_document_task(self, document_id: str):
     db = SessionLocal()
     try:
-        document = db.query(Document).get(document_id)
+        document = db.get(Document, document_id)
         if document is None:
             logger.error("Document %s not found", document_id)
             return
@@ -156,7 +156,7 @@ def process_document_task(self, document_id: str):
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Pipeline failed for %s: %s", document_id, traceback.format_exc())
-        document = db.query(Document).get(document_id)
+        document = db.get(Document, document_id)
         if document:
             document.status = ProcessingStatus.failed
             document.error_message = str(exc)
@@ -170,7 +170,7 @@ def process_document_task(self, document_id: str):
 def run_contradiction_detection_task(project_id: str):
     db = SessionLocal()
     try:
-        project = db.query(Project).get(project_id)
+        project = db.get(Project, project_id)
         if project is None:
             return
         docs = [d for d in project.documents if d.status == ProcessingStatus.complete]
@@ -207,10 +207,10 @@ def run_contradiction_detection_task(project_id: str):
 def sync_document_to_crm_task(self, document_id: str):
     db = SessionLocal()
     try:
-        document = db.query(Document).get(document_id)
+        document = db.get(Document, document_id)
         if document is None:
             return
-        project = db.query(Project).get(document.project_id)
+        project = db.get(Project, document.project_id)
 
         sync_row = db.query(CrmSyncRecord).filter_by(document_id=document_id).first()
         if sync_row is None:
@@ -223,7 +223,7 @@ def sync_document_to_crm_task(self, document_id: str):
             sync_row.external_record_id = external_id
             sync_row.status = "synced"
             sync_row.last_error = None
-            sync_row.last_synced_at = datetime.utcnow()
+            sync_row.last_synced_at = utcnow()
         except Exception as exc:  # noqa: BLE001
             sync_row.status = "failed"
             sync_row.last_error = str(exc)
