@@ -1,6 +1,6 @@
 import uuid
 import enum
-from datetime import datetime
+from app.utils import utcnow
 from sqlalchemy import (
     Column, String, Integer, Float, Text, DateTime, ForeignKey, JSON, Enum, Boolean
 )
@@ -41,7 +41,7 @@ class User(Base):
     email = Column(String, nullable=False, unique=True, index=True)
     hashed_password = Column(String, nullable=False)
     name = Column(String, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
 
@@ -50,10 +50,10 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(String, primary_key=True, default=gen_id)
-    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     owner = relationship("User", back_populates="projects")
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
@@ -64,7 +64,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(String, primary_key=True, default=gen_id)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
 
     filename = Column(String, nullable=False)
     filepath = Column(String, nullable=False)  # ephemeral local path used during processing
@@ -88,8 +88,8 @@ class Document(Base):
     risk_score = Column(Float, nullable=True)
     risk_breakdown = Column(JSON, default=dict)        # Stage 4 output
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     project = relationship("Project", back_populates="documents")
     anomalies = relationship("Anomaly", back_populates="document", cascade="all, delete-orphan")
@@ -103,7 +103,7 @@ class PipelineStageResult(Base):
     __tablename__ = "pipeline_stage_results"
 
     id = Column(String, primary_key=True, default=gen_id)
-    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
     stage_number = Column(Integer, nullable=False)
     stage_name = Column(String, nullable=False)
     status = Column(String, default="pending")  # pending | active | complete | failed
@@ -118,12 +118,12 @@ class Anomaly(Base):
     __tablename__ = "anomalies"
 
     id = Column(String, primary_key=True, default=gen_id)
-    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
     severity = Column(Enum(Severity), nullable=False)
     category = Column(String)  # e.g. "termination_notice", "amount_mismatch"
     explanation = Column(Text)
     evidence = Column(JSON, default=dict)  # the specific values that triggered the flag
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     document = relationship("Document", back_populates="anomalies")
 
@@ -132,14 +132,14 @@ class Contradiction(Base):
     __tablename__ = "contradictions"
 
     id = Column(String, primary_key=True, default=gen_id)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
     document_a_id = Column(String, ForeignKey("documents.id"))
     document_b_id = Column(String, ForeignKey("documents.id"))
     field = Column(String)  # e.g. "payment_terms_days", "revenue"
     value_a = Column(String)
     value_b = Column(String)
     explanation = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     project = relationship("Project", back_populates="contradictions")
 
@@ -148,7 +148,7 @@ class CrmSyncRecord(Base):
     __tablename__ = "crm_sync_records"
 
     id = Column(String, primary_key=True, default=gen_id)
-    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
     provider = Column(String)
     external_record_id = Column(String, nullable=True)
     status = Column(String, default="pending")  # pending | synced | failed
