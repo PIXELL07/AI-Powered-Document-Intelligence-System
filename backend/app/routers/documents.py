@@ -20,10 +20,10 @@ def _get_owned_document(document_id: str, current_user: models.User, db: Session
     """A document's ownership is derived from its project's owner_id --
     documents don't carry owner_id directly to avoid it ever drifting out
     of sync with the project it belongs to."""
-    document = db.query(models.Document).get(document_id)
+    document = db.get(models.Document, document_id)
     if not document:
         raise HTTPException(404, "Document not found")
-    project = db.query(models.Project).get(document.project_id)
+    project = db.get(models.Project, document.project_id)
     if not project or project.owner_id != current_user.id:
         raise HTTPException(404, "Document not found")
     return document
@@ -36,7 +36,7 @@ async def upload_document(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(models.Project).get(project_id)
+    project = db.get(models.Project, project_id)
     if not project or project.owner_id != current_user.id:
         raise HTTPException(404, "Project not found")
 
