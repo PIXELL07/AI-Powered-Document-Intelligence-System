@@ -44,9 +44,9 @@ class ConnectionManager:
         if self._listener_task:
             self._listener_task.cancel()
         if self._pubsub:
-            await self._pubsub.close()
+            await self._pubsub.aclose()
         if self._redis:
-            await self._redis.close()
+            await self._redis.aclose()
 
     async def _listen(self):
         assert self._pubsub is not None
@@ -58,12 +58,18 @@ class ConnectionManager:
             sockets = self._connections.get(document_id, set())
             if not sockets:
                 continue
-            dead = []
-            for ws in sockets:
-                try:
-                    await ws.send_text(message["data"])
-                except Exception:
-                    dead.append(ws)
+            # Fan out concurrently rather than one-at-a-time: a sequential
+            # `for ws in sockets: await ws.send_text(...)` loop means one
+            # slow or half-open browser tab delays delivery to every other
+            # socket waiting on this same document (and, since this is a
+            # single listener task shared across ALL documents, it could
+            # back up unrelated documents' updates too). gather() with
+            # return_exceptions lets every send proceed independently.
+            results = await asyncio.gather(
+                *(ws.send_text(message["data"]) for ws in sockets),
+                return_exceptions=True,
+            )
+            dead = [ws for ws, result in zip(sockets, results) if isinstance(result, Exception)]
             for ws in dead:
                 sockets.discard(ws)
 
@@ -81,14 +87,31 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# A module-level, lazily-created connection pool reused across every
+# publish_stage_update() call. The original version opened a brand-new
+# TCP connection to Redis for every single stage transition -- fine at
+# demo scale, but at real concurrency (many documents each publishing ~6
+# stage updates) that's thousands of short-lived connections per minute,
+# which risks hitting Redis's max client connections and adds needless
+# per-call TCP handshake latency. A pool hands out and reclaims a small
+# number of persistent connections instead.
+_publish_pool = None
+
+
+def _get_publish_client():
+    global _publish_pool
+    import redis as sync_redis
+
+    if _publish_pool is None:
+        _publish_pool = sync_redis.ConnectionPool.from_url(
+            settings.REDIS_URL, decode_responses=True, max_connections=50
+        )
+    return sync_redis.Redis(connection_pool=_publish_pool)
+
 
 def publish_stage_update(document_id: str, payload: dict):
     """Synchronous publisher used from Celery worker processes (which are
-    plain sync code, not asyncio). Uses a short-lived sync redis client."""
-    import redis as sync_redis
-
-    client = sync_redis.from_url(settings.REDIS_URL, decode_responses=True)
-    try:
-        client.publish(f"doc:{document_id}", json.dumps(payload))
-    finally:
-        client.close()
+    plain sync code, not asyncio). Reuses a pooled connection rather than
+    opening a new one per call -- see _get_publish_client() docstring."""
+    client = _get_publish_client()
+    client.publish(f"doc:{document_id}", json.dumps(payload))
