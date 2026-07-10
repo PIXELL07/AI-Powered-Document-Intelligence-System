@@ -23,3 +23,5 @@ celery_app.conf.update(
     # envelope with multiple CPU-bound ML stages running in parallel.
     worker_concurrency=int(__import__("os").getenv("CELERY_CONCURRENCY", "2")),
 )
+
+# come back and need to check celery - docintel
