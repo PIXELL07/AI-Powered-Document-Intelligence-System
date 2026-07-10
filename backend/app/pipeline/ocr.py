@@ -76,14 +76,12 @@ def _postprocess(raw_text: str) -> str:
     return text.strip()
 
 
-def _ocr_single_image_array(img_array) -> dict:
-    import pytesseract
-    import cv2
-
-    deskewed = _deskew(img_array)
-    data = pytesseract.image_to_data(
-        deskewed, lang=settings.OCR_LANGUAGES, output_type=pytesseract.Output.DICT
-    )
+def _group_words_into_lines(data: dict) -> tuple[str, float]:
+    """Pure function: takes pytesseract's image_to_data() output dict and
+    reconstructs line-broken text, grouping words by (block_num, par_num,
+    line_num) rather than space-joining everything. Separated from the
+    actual pytesseract/cv2 calls so it can be unit tested with a plain
+    dict fixture, no image or OCR engine required."""
     n = len(data["text"])
     confidences = []
     lines: dict[tuple, list[str]] = {}
@@ -107,6 +105,17 @@ def _ocr_single_image_array(img_array) -> dict:
 
     text = "\n".join(" ".join(lines[k]) for k in line_order)
     mean_conf = sum(confidences) / len(confidences) if confidences else 0.0
+    return text, mean_conf
+
+
+def _ocr_single_image_array(img_array) -> dict:
+    import pytesseract
+
+    deskewed = _deskew(img_array)
+    data = pytesseract.image_to_data(
+        deskewed, lang=settings.OCR_LANGUAGES, output_type=pytesseract.Output.DICT
+    )
+    text, mean_conf = _group_words_into_lines(data)
     return {"text": text, "confidence": mean_conf}
 
 
