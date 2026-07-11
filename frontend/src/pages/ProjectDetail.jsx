@@ -16,6 +16,7 @@ export default function ProjectDetail() {
   const [documents, setDocuments] = useState([]);
   const [contradictions, setContradictions] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -49,6 +50,23 @@ export default function ProjectDetail() {
       await load();
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDelete = async (e, doc) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${doc.filename}"? This removes its extraction results, anomalies, and CRM sync record. This can't be undone.`)) {
+      return;
+    }
+    setDeletingId(doc.id);
+    try {
+      await api.deleteDocument(doc.id);
+      await load();
+    } catch (err) {
+      alert(`Couldn't delete document: ${err.message}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -96,12 +114,14 @@ export default function ProjectDetail() {
       ) : (
         <div className="grid gap-2">
           {documents.map((d) => (
-            <Link
+            <div
               key={d.id}
-              to={d.status === "complete" ? `/documents/${d.id}` : `/documents/${d.id}/processing`}
               className="flex items-center justify-between border border-hairline rounded-md p-3 bg-surface hover:border-ledger transition"
             >
-              <div>
+              <Link
+                to={d.status === "complete" ? `/documents/${d.id}` : `/documents/${d.id}/processing`}
+                className="flex-1 min-w-0"
+              >
                 <span className="font-body text-sm text-ink">{d.filename}</span>
                 {d.document_type && (
                   <span className="ml-2 font-mono text-xs text-inkfaint uppercase">{d.document_type.replace(/_/g, " ")}</span>
@@ -109,16 +129,24 @@ export default function ProjectDetail() {
                 {d.low_quality_flag && (
                   <span className="ml-2 font-mono text-xs text-warn uppercase">low OCR confidence</span>
                 )}
-              </div>
-              <div className="flex items-center gap-3">
+              </Link>
+              <div className="flex items-center gap-3 shrink-0">
                 {d.risk_score != null && d.status === "complete" && (
                   <span className="font-mono text-xs text-inkfaint">risk {Math.round(d.risk_score)}</span>
                 )}
                 <span className={`px-2 py-0.5 rounded border text-xs font-mono uppercase tracking-wide ${STATUS_STYLE[d.status]}`}>
                   {d.status}
                 </span>
+                <button
+                  onClick={(e) => handleDelete(e, d)}
+                  disabled={deletingId === d.id}
+                  title="Delete document"
+                  className="font-mono text-xs uppercase tracking-wide text-inkfaint hover:text-critical transition disabled:opacity-50 px-1"
+                >
+                  {deletingId === d.id ? "…" : "Delete"}
+                </button>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}

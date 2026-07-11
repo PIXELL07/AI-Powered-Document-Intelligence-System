@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import SeverityBadge from "../components/SeverityBadge.jsx";
 import RiskChart from "../components/RiskChart.jsx";
@@ -98,9 +98,11 @@ function ExtractionPanel({ documentType, entities }) {
 
 export default function DocumentDetail() {
   const { documentId } = useParams();
+  const navigate = useNavigate();
   const [document, setDocument] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
   const [crmSync, setCrmSync] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     const [doc, anoms, sync] = await Promise.all([
@@ -115,6 +117,20 @@ export default function DocumentDetail() {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleDelete = async () => {
+    if (!window.confirm(`Delete "${document.filename}"? This removes its extraction results, anomalies, and CRM sync record. This can't be undone.`)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.deleteDocument(documentId);
+      navigate(`/projects/${document.project_id}`, { replace: true });
+    } catch (err) {
+      alert(`Couldn't delete document: ${err.message}`);
+      setDeleting(false);
+    }
+  };
+
   if (!document) return <p className="text-inkfaint text-sm">Loading…</p>;
 
   const grouped = { critical: [], warning: [], informational: [] };
@@ -127,9 +143,18 @@ export default function DocumentDetail() {
       </Link>
       <div className="flex items-baseline justify-between mt-2">
         <h1 className="font-display text-3xl font-semibold text-ink">{document.filename}</h1>
-        <span className="font-mono text-xs uppercase tracking-wide text-inkfaint">
-          {document.document_type?.replace(/_/g, " ")}
-        </span>
+        <div className="flex items-center gap-4">
+          <span className="font-mono text-xs uppercase tracking-wide text-inkfaint">
+            {document.document_type?.replace(/_/g, " ")}
+          </span>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="font-mono text-xs uppercase tracking-wide px-3 py-1.5 rounded border border-critical/40 text-critical hover:bg-critical hover:text-white transition disabled:opacity-50"
+          >
+            {deleting ? "Deleting…" : "Delete document"}
+          </button>
+        </div>
       </div>
 
       {document.low_quality_flag && (
