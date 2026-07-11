@@ -264,7 +264,125 @@ PDF/DOCX/XLSX invoices are unaffected. Fixing this properly means adding
 table-region detection to the OCR path (e.g. via layout analysis on word
 bounding boxes) — flagged as a next step rather than silently shipped.
 
+### Automated test suite
 
+Manual end-to-end runs like the above are good for catching integration
+bugs, but nothing stopped a future change from silently reintroducing
+them. `backend/tests/` has 55 pytest tests covering:
+
+- **Regression tests for all three bugs above** (`test_ocr.py`,
+  `test_ingestion.py`, `test_extraction.py`) — a synthetic pytesseract
+  data dict that reproduces the exact line-merging failure, an XLSX
+  fixture with a metadata preamble above the real header row, and a
+  fixture with trailing Tax/Total rows that previously leaked into
+  line items.
+- Anomaly detection for all three document types (amount mismatch,
+  duplicate line items, past-due dates, short termination notice, long
+  payment terms, asymmetric liability caps, missing clauses, liabilities
+  exceeding assets, YoY threshold breaches).
+- Risk scoring (severity weighting, category breakdown, the 100-point cap).
+- Contradiction detection (revenue-vs-invoice-total, mismatched payment
+  terms between documents sharing a party, and the negative cases —
+  no false positive when values are close or parties don't overlap).
+- Auth and multi-tenancy, against the real FastAPI app via `TestClient`
+  (not reimplemented logic): signup validation, login success/failure,
+  token validation, and — the important one — that a second user
+  actually cannot see or touch a first user's projects/documents, with a
+  plain 404 rather than a leak.
+
+Run them with:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+
+Requires a local Redis (rate limiting and the WebSocket pub/sub bridge
+are both Redis-backed, and the FastAPI app's startup connects to Redis
+even under `TestClient`). `docker compose up redis` is the easiest way to
+get one for a bare test run. Stage 1's NER step is monkeypatched to a
+tiny local stand-in model in tests (see `conftest.py`) so the suite
+doesn't depend on downloading `en_core_web_sm` on every run — the
+shipped application code is untouched and uses the real model.
+
+## Scaling to concurrent users
+
+None of this is required to *run* the app, but it's what would actually
+break first under real concurrent load (targeted at "what happens with
+~1000 concurrent users" specifically), and what's already been fixed vs.
+what's a known next step:
+
+**Fixed in this pass:**
+- **DB connection pool was implicit/default** (5 connections + 10
+  overflow), which exhausts fast once requests are actually concurrent
+  rather than sequential. `database.py` now sets explicit `pool_size`,
+  `max_overflow`, and `pool_recycle` for Postgres (SQLite doesn't have a
+  real pool regardless — see below).
+- **Every Redis publish opened a brand-new TCP connection.**
+  `publish_stage_update()` (called on every one of a document's ~6 stage
+  transitions) was creating and tearing down a fresh Redis client per
+  call. At real concurrency that's thousands of short-lived connections
+  per minute, risking Redis's max-clients limit. Fixed with a
+  module-level connection pool reused across calls.
+- **WebSocket fan-out was sequential.** The Redis-subscriber loop that
+  forwards stage updates to browser sockets used a `for` loop with
+  `await ws.send_text(...)` one at a time — a single slow or half-open
+  browser tab would delay delivery to every other socket waiting on any
+  document, since it's one shared listener task. Fixed with
+  `asyncio.gather` so sends happen concurrently and a stuck socket only
+  fails its own send.
+- **No rate limiting on login/signup.** Unbounded auth endpoints are
+  themselves a load risk (brute-force traffic, scripted signup spam) as
+  much as a security one. Added a Redis-backed fixed-window limiter
+  (`app/rate_limit.py`) — Redis-backed specifically because the app runs
+  as multiple worker processes (see below), so an in-memory counter
+  would only see the fraction of requests that happened to land on one
+  process.
+- **Single uvicorn worker process.** `Procfile`'s `web` process now runs
+  `--workers ${WEB_WORKERS:-2}` (configurable). This is safe with this
+  app's design specifically because the WebSocket fan-out goes through
+  Redis pub/sub rather than in-process state — every worker process (and
+  every Railway replica) subscribes to the same `doc:*` pattern and
+  independently forwards to whichever sockets it happens to hold, so
+  scaling to N processes doesn't require sticky sessions or a shared
+  in-memory socket registry.
+- Foreign key columns used in frequent filter queries (`Document.project_id`,
+  `Anomaly.document_id`, `PipelineStageResult.document_id`,
+  `Contradiction.project_id`, `CrmSyncRecord.document_id`) now have
+  `index=True` — previously unindexed, meaning every "list documents for
+  this project" / "list anomalies for this document" query was a table
+  scan.
+
+**Known next steps, not yet done:**
+- **SQLite is a dev/demo default, not a concurrent-load target.** It's
+  single-writer regardless of any pool settings. `DATABASE_URL` must
+  point at Postgres (Railway's Postgres plugin, or any managed Postgres)
+  before this could handle real concurrent traffic — the connection pool
+  tuning above assumes Postgres.
+- **No schema migration system.** `init_db()` is a one-time
+  `Base.metadata.create_all()` — fine for a first deploy, but any future
+  schema change against a live database needs a real migration tool
+  (Alembic) rather than hand-editing a running Postgres instance.
+- **Celery worker concurrency and replica count aren't auto-scaling.**
+  Under sustained high upload volume, the fix is horizontal — run more
+  `worker` replicas on Railway (each is a separate process pulling from
+  the same Redis queue, so this requires no code change) — but nothing
+  currently detects load and scales automatically.
+- **The Redis pub/sub bridge subscribes to one global `doc:*` pattern**
+  rather than dynamically subscribing/unsubscribing per active document.
+  This is simple and correct, but at very high documents-in-flight counts
+  it means every worker process receives every document's messages
+  regardless of whether it holds that document's WebSocket — an
+  optimization opportunity if channel volume ever becomes the bottleneck,
+  not something that's broken today.
+- **bcrypt's cost factor is a deliberate CPU/security tradeoff.** Under
+  very high concurrent login volume this becomes a real throughput limit
+  (that's the point of bcrypt), so it's not "fixed" so much as flagged:
+  if login latency under load ever becomes a problem, the answer is
+  horizontal scaling of the web process, not lowering the work factor.
+
+## Configurable anomaly thresholds
 
 Set via environment variables (see `backend/.env.example`):
 `MIN_TERMINATION_NOTICE_DAYS`, `MAX_PAYMENT_TERMS_DAYS`,
