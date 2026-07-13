@@ -21,3 +21,5 @@ export function useDocumentSocket(documentId, onMessage) {
     return () => socket.close();
   }, [documentId]);
 }
+
+// token as query param
